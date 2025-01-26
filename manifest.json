@@ -1,0 +1,10 @@
+{
+    "domain": "denon232",
+    "name": "Denon AVR Serial",
+    "documentation": "",
+    "dependencies": [],
+    "codeowners": [],
+    "requirements": ["pyserial==3.5"],
+    "config_flow": true,
+    "version": "1.0.0"
+}
