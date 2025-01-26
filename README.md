@@ -30,5 +30,7 @@ Add the following to your Home Assistant configuration:
 
 media_player:
   - platform: denon232
-    serial_port: /dev/ttyUSB? (replace ? with the port number)
+    serial_port: /dev/ttyUSB?
     name: DenonReceiver
+
+ replace ? with the number of the usb serial device you are using.
