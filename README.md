@@ -25,12 +25,11 @@ The following input sources are supported by default:
 
 ## Configuration
 
-Download a zip file of the component from the repository and unzip it into the custom_components folder in your Home Assistant config directory.
+Download a zip file of the component from the repository and unzip it into the `custom_components` folder in your Home Assistant config directory.  
 Add the following to your Home Assistant configuration:
 
+```yaml
 media_player:
   - platform: denon232
     serial_port: /dev/ttyUSB?
     name: DenonReceiver
-
- replace ? with the number of the usb serial device you are using.
