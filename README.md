@@ -45,14 +45,16 @@ Zone 2 supports all sources except **TV** and **HDP** (per AVR-2310 protocol spe
 
 ### HACS (Recommended)
 
-1. Open HACS in your Home Assistant instance
-2. Click on "Integrations"
-3. Click the three dots menu in the top right corner
-4. Select "Custom repositories"
-5. Add the repository URL and select "Integration" as the category
-6. Click "Add"
-7. Search for "Denon AVR RS-232" and install it
-8. Restart Home Assistant
+1. Click on the '<> Code' button above
+2. Click on the 'Copy URL to Clipboard' button
+3. Open HACS in your Home Assistant instance
+4. Click the three dots menu in the top right corner
+5. Select "Custom repositories"
+6. Paste the repository URL and select "Integration" as the category
+7. Click "Add"
+8. In HACS Search for "Denon AVR RS-232"
+9. Click the three dots at the far right and click download
+9. Restart Home Assistant
 
 ### Manual Installation
 
