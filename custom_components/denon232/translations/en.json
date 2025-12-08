@@ -6,11 +6,13 @@
         "description": "Configure your Denon receiver connected via RS-232 serial port.",
         "data": {
           "name": "Name",
-          "serial_port": "Serial Port"
+          "serial_port": "Serial Port",
+          "skip_test": "Skip connection test (development mode)"
         },
         "data_description": {
           "name": "A friendly name for your receiver (e.g., Living Room Receiver)",
-          "serial_port": "The serial port path (e.g., /dev/ttyUSB0 on Linux or COM3 on Windows)"
+          "serial_port": "The serial port path (e.g., /dev/ttyUSB0 on Linux or COM3 on Windows)",
+          "skip_test": "Enable this to skip serial port validation when no receiver is connected"
         }
       }
     },
@@ -23,4 +25,3 @@
     }
   }
 }
-

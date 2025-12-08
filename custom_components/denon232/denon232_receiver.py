@@ -33,25 +33,58 @@ class Denon232Receiver:
         self._serial_port = serial_port
         self._timeout = timeout
         self._write_timeout = write_timeout
-        self.ser = serial.Serial(
-            serial_port,
-            baudrate=9600,
-            bytesize=8,
-            parity="N",
-            stopbits=1,
-            timeout=timeout,
-            write_timeout=write_timeout,
-        )
+        self._available = False
+        self.ser = None
         self.lock = threading.Lock()
+        
+        # Try to connect, but don't fail if we can't (development mode support)
+        try:
+            self.ser = serial.Serial(
+                serial_port,
+                baudrate=9600,
+                bytesize=8,
+                parity="N",
+                stopbits=1,
+                timeout=timeout,
+                write_timeout=write_timeout,
+            )
+            self._available = True
+            _LOGGER.info("Connected to Denon receiver at %s", serial_port)
+        except (serial.SerialException, OSError) as err:
+            _LOGGER.warning(
+                "Could not connect to serial port %s: %s. "
+                "Running in development/offline mode.",
+                serial_port,
+                err,
+            )
+            self._available = False
+
+    @property
+    def available(self) -> bool:
+        """Return True if the receiver connection is available."""
+        return self._available
 
     def serial_command(
         self, cmd: str, response: bool = False, all_lines: bool = False
     ) -> str | list[str] | None:
         """Send a command to the receiver and optionally read response."""
+        if not self._available or self.ser is None:
+            _LOGGER.debug("Command %s skipped - receiver not available", cmd)
+            if response:
+                return [] if all_lines else ""
+            return None
+            
         _LOGGER.debug("Command: %s", cmd)
         
-        if not self.ser.is_open:
-            self.ser.open()
+        try:
+            if not self.ser.is_open:
+                self.ser.open()
+        except (serial.SerialException, OSError) as err:
+            _LOGGER.error("Failed to open serial port: %s", err)
+            self._available = False
+            if response:
+                return [] if all_lines else ""
+            return None
 
         try:
             self.lock.acquire()
@@ -77,6 +110,12 @@ class Denon232Receiver:
                 return lines[0] if lines else ""
             
             return None
+        except (serial.SerialException, OSError) as err:
+            _LOGGER.error("Serial communication error: %s", err)
+            self._available = False
+            if response:
+                return [] if all_lines else ""
+            return None
         finally:
             self.lock.release()
 
@@ -86,5 +125,5 @@ class Denon232Receiver:
             if self.ser and self.ser.is_open:
                 self.ser.close()
                 _LOGGER.debug("Serial connection closed for %s", self._serial_port)
-        except serial.SerialException as err:
+        except (serial.SerialException, OSError) as err:
             _LOGGER.error("Error closing serial connection: %s", err)

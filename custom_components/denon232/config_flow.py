@@ -16,6 +16,8 @@ from .const import CONF_NAME, CONF_SERIAL_PORT, DEFAULT_NAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+CONF_SKIP_TEST = "skip_test"
+
 
 def validate_serial_port(port: str) -> bool:
     """Validate that the serial port exists and can be opened."""
@@ -34,12 +36,19 @@ def validate_serial_port(port: str) -> bool:
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     port = data[CONF_SERIAL_PORT]
+    skip_test = data.get(CONF_SKIP_TEST, False)
     
-    # Run validation in executor since it's blocking
-    is_valid = await hass.async_add_executor_job(validate_serial_port, port)
-    
-    if not is_valid:
-        raise CannotConnect(f"Cannot connect to serial port: {port}")
+    # Skip validation if requested (for development)
+    if not skip_test:
+        # Run validation in executor since it's blocking
+        is_valid = await hass.async_add_executor_job(validate_serial_port, port)
+        
+        if not is_valid:
+            raise CannotConnect(f"Cannot connect to serial port: {port}")
+    else:
+        _LOGGER.warning(
+            "Skipping serial port validation for %s (development mode)", port
+        )
     
     return {"title": data.get(CONF_NAME, DEFAULT_NAME)}
 
@@ -67,13 +76,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                return self.async_create_entry(title=info["title"], data=user_input)
+                # Don't store skip_test in the config entry
+                config_data = {
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_SERIAL_PORT: user_input[CONF_SERIAL_PORT],
+                }
+                return self.async_create_entry(title=info["title"], data=config_data)
 
         # Show the form
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
                 vol.Required(CONF_SERIAL_PORT, default="/dev/ttyUSB0"): str,
+                vol.Optional(CONF_SKIP_TEST, default=False): bool,
             }
         )
 
@@ -86,4 +101,3 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(Exception):
     """Error to indicate we cannot connect."""
-

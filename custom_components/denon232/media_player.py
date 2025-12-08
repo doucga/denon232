@@ -67,6 +67,11 @@ class DenonBase(MediaPlayerEntity):
         self._source_list = NORMAL_INPUTS.copy()
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._receiver.available
+
+    @property
     def device_info(self) -> DeviceInfo:
         """Return device information about this Denon receiver."""
         return DeviceInfo(
