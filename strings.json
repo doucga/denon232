@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Denon AVR RS-232 Setup",
+        "description": "Configure your Denon receiver connected via RS-232 serial port.",
+        "data": {
+          "name": "Name",
+          "serial_port": "Serial Port"
+        },
+        "data_description": {
+          "name": "A friendly name for your receiver (e.g., Living Room Receiver)",
+          "serial_port": "The serial port path (e.g., /dev/ttyUSB0 on Linux or COM3 on Windows)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the serial port. Please verify the port path and that the receiver is connected.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This serial port is already configured."
+    }
+  }
+}
+

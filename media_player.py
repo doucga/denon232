@@ -1,199 +1,355 @@
-"""
-Support for Denon Network Receivers.
+"""Media player platform for Denon AVR RS-232 integration."""
+from __future__ import annotations
 
-Based off:
-https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/media_player/denon.py
-https://github.com/joopert/nad_receiver/blob/master/nad_receiver/__init__.py 
-
-For more details about this platform, please refer to the documentation at
-https://home-assistant.io/components/media_player.denon/
-"""
 import logging
-
-import voluptuous as vol
+from typing import Any
 
 from homeassistant.components.media_player import (
-    MediaPlayerEntity, PLATFORM_SCHEMA)
+    MediaPlayerEntity,
+    MediaPlayerEntityFeature,
+    MediaPlayerState,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from homeassistant.components.media_player.const import (
-    SUPPORT_SELECT_SOURCE, SUPPORT_TURN_OFF, SUPPORT_TURN_ON,
-    SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_SET,SUPPORT_VOLUME_STEP)
-from homeassistant.const import (
-    CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
-import homeassistant.helpers.config_validation as cv
+from .const import CONF_NAME, CONF_SERIAL_PORT, DOMAIN, NORMAL_INPUTS, ZONE2_INPUTS
+from .denon232_receiver import Denon232Receiver
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_NAME = 'Denon232 Receiver'
 
-SUPPORT_DENON = SUPPORT_VOLUME_SET | SUPPORT_VOLUME_STEP | \
-    SUPPORT_VOLUME_MUTE | SUPPORT_TURN_ON | SUPPORT_TURN_OFF | SUPPORT_SELECT_SOURCE
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Denon media player from a config entry."""
+    receiver: Denon232Receiver = hass.data[DOMAIN][entry.entry_id]
+    name = entry.data[CONF_NAME]
+    serial_port = entry.data[CONF_SERIAL_PORT]
 
-CONF_SERIAL_PORT = 'serial_port'
+    entities = [
+        DenonMainZone(receiver, name, serial_port, entry.entry_id),
+        DenonZone2(receiver, name, serial_port, entry.entry_id),
+    ]
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_SERIAL_PORT): cv.string,
-    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-})
+    async_add_entities(entities, True)
 
-NORMAL_INPUTS = {'CD': 'CD', 'DVD': 'DVD', 'TV': 'TV/CBL','HDP': 'HDP', 'DVR': 'DVR', 'Video Aux': 'V.AUX'}
 
-# Sub-modes of 'NET/USB'
-# {'USB': 'USB', 'iPod Direct': 'IPD', 'Internet Radio': 'IRP',
-#  'Favorites': 'FVP'}
+class DenonBase(MediaPlayerEntity):
+    """Base class for Denon media player entities."""
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Set up the Denon232 platform."""
+    _attr_has_entity_name = True
 
-    from .denon232_receiver import Denon232Receiver
-    add_devices([Denon(
-        config.get(CONF_NAME),
-        Denon232Receiver(config.get(CONF_SERIAL_PORT))
-    )], True)
-
-class Denon(MediaPlayerEntity):
-    """Representation of a Denon device."""
+    def __init__(
+        self,
+        receiver: Denon232Receiver,
+        name: str,
+        serial_port: str,
+        entry_id: str,
+        zone: str,
+    ) -> None:
+        """Initialize the Denon media player."""
+        self._receiver = receiver
+        self._base_name = name
+        self._serial_port = serial_port
+        self._entry_id = entry_id
+        self._zone = zone
         
-    def __init__(self, name, denon232_receiver):
-        """Initialize the Denon Receiver device."""
-        self._name = name
-        self._pwstate = 'PWSTANDBY'
-        self._volume = 0
-        # Initial value 60dB, changed if we get a MVMAX
-        self._volume_max = 65
+        # State attributes
+        self._power_state: str | None = None
+        self._volume: float = 0
+        self._volume_max: int = 65
+        self._muted: bool = False
+        self._source: str | None = None
         self._source_list = NORMAL_INPUTS.copy()
-        self._mediasource = ''
-        self._muted = False
-        self._pwstate_z2 = 'Z2OFF'
-        self._volume_z2 = 0
-        self._muted_z2 = False
-        self._denon232_receiver = denon232_receiver
 
-    def update(self):
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information about this Denon receiver."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._serial_port)},
+            name=self._base_name,
+            manufacturer="Denon",
+            model="AVR RS-232",
+        )
+
+    @property
+    def source_list(self) -> list[str]:
+        """Return the list of available input sources."""
+        return sorted(list(self._source_list.keys()))
+
+
+class DenonMainZone(DenonBase):
+    """Representation of the Denon Main Zone."""
+
+    _attr_supported_features = (
+        MediaPlayerEntityFeature.VOLUME_SET
+        | MediaPlayerEntityFeature.VOLUME_STEP
+        | MediaPlayerEntityFeature.VOLUME_MUTE
+        | MediaPlayerEntityFeature.TURN_ON
+        | MediaPlayerEntityFeature.TURN_OFF
+        | MediaPlayerEntityFeature.SELECT_SOURCE
+    )
+
+    def __init__(
+        self,
+        receiver: Denon232Receiver,
+        name: str,
+        serial_port: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize the Main Zone."""
+        super().__init__(receiver, name, serial_port, entry_id, "main")
+        self._attr_unique_id = f"{serial_port}_main"
+        self._attr_name = "Main Zone"
+
+    async def async_update(self) -> None:
         """Get the latest details from the device."""
+        hass = self.hass
 
-        self._pwstate = self._denon232_receiver.serial_command('PW?', response=True)
-        
-        for line in self._denon232_receiver.serial_command('MV?', response=True, all_lines=True):
-            if line.startswith('MVMAX '):
-                # only grab two digit max, don't care about any half digit
-                self._volume_max = int(line[len('MVMAX '):len('MVMAX XX')])
-                _LOGGER.debug("MVMAX Value Saved: %s", self._volume_max)
-                continue
-            if line.startswith('MV'):
-                self._volume = int(line[len('MV'):len('MVXX')])
-                if self._volume == 99:
-                    self._volume = 0
-                _LOGGER.debug("MV Value Saved: %s", self._volume)
-        self._muted = (self._denon232_receiver.serial_command('MU?', response=True) == 'MUON')
-        self._mediasource = self._denon232_receiver.serial_command('SI?', response=True)[len('SI'):]
-        self._pwstate_z2 = (self._denon232_receiver.serial_command('Z2?', response=True) == 'Z2ON')
-        self._volume_z2 = self._denon232_receiver.serial_command('Z2CV?', response=True)
-        self._muted_z2 = (self._denon232_receiver.serial_command('Z2MU?', response=True) == 'Z2MUON')
+        # Get power state
+        self._power_state = await hass.async_add_executor_job(
+            self._receiver.serial_command, "PW?", True
+        )
+
+        # Get volume and max volume
+        volume_lines = await hass.async_add_executor_job(
+            self._receiver.serial_command, "MV?", True, True
+        )
+        if volume_lines:
+            for line in volume_lines:
+                if line.startswith("MVMAX "):
+                    # Only grab two digit max
+                    self._volume_max = int(line[6:8])
+                    _LOGGER.debug("MVMAX Value: %s", self._volume_max)
+                elif line.startswith("MV"):
+                    # Volume can be 2 or 3 chars (e.g., MV50 or MV505 for half-dB)
+                    vol_str = line[2:]
+                    if len(vol_str) == 3:
+                        # Half-dB value like "505" means 50.5
+                        self._volume = int(vol_str[:2]) + 0.5
+                    else:
+                        self._volume = int(vol_str[:2])
+                    if self._volume == 99:
+                        self._volume = 0
+                    _LOGGER.debug("MV Value: %s", self._volume)
+
+        # Get mute state
+        mute_response = await hass.async_add_executor_job(
+            self._receiver.serial_command, "MU?", True
+        )
+        self._muted = mute_response == "MUON"
+
+        # Get source
+        source_response = await hass.async_add_executor_job(
+            self._receiver.serial_command, "SI?", True
+        )
+        if source_response and source_response.startswith("SI"):
+            self._source = source_response[2:]
 
     @property
-    def name(self):
-        """Return the name of the device."""
-        return self._name
-
-    @property
-    def state(self):
+    def state(self) -> MediaPlayerState:
         """Return the state of the device."""
-        if self._pwstate == 'PWSTANDBY':
-            return STATE_OFF
-        else:
-            return STATE_ON
+        if self._power_state == "PWSTANDBY":
+            return MediaPlayerState.OFF
+        return MediaPlayerState.ON
 
     @property
-    def volume_level(self):
+    def volume_level(self) -> float:
         """Volume level of the media player (0..1)."""
-        return self._volume / self._volume_max
+        return self._volume / self._volume_max if self._volume_max else 0
 
     @property
-    def is_volume_muted(self):
+    def is_volume_muted(self) -> bool:
         """Return boolean if volume is currently muted."""
         return self._muted
 
     @property
-    def source_list(self):
-        """Return the list of available input sources."""
-        return sorted(list(self._source_list.keys()))
-
-    @property
-    def supported_features(self):
-        """Flag media player features that are supported."""
-        return SUPPORT_DENON
-
-    @property
-    def source(self):
+    def source(self) -> str | None:
         """Return the current input source."""
         for pretty_name, name in self._source_list.items():
-            if self._mediasource == name:
+            if self._source == name:
                 return pretty_name
+        return self._source
 
-    @property
-    def state_zone2(self):
-        """Return the state of the device."""
-        if self._pwstate_z2 == 'Z2OFF':
-            return STATE_OFF
-        else:
-            return STATE_ON
-    
-    @property
-    def is_zone2_volume_muted(self):
-        """Return boolean if volume is currently muted."""
-        return self._muted_z2
-
-    @property
-    def volume_level_zone2(self):
-        """Volume level of the media player (0..1)."""
-        return self._volume_z2 / self._volume_max
-
-    def turn_on(self):
+    async def async_turn_on(self) -> None:
         """Turn the media player on."""
-        self._denon232_receiver.serial_command('PWON')
-        
-    def turn_off(self):
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "PWON"
+        )
+
+    async def async_turn_off(self) -> None:
         """Turn off media player."""
-        self._denon232_receiver.serial_command('PWSTANDBY')
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "PWSTANDBY"
+        )
 
-    def volume_up(self):
+    async def async_volume_up(self) -> None:
         """Volume up media player."""
-        self._denon232_receiver.serial_command('MVUP')
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "MVUP"
+        )
 
-    def volume_down(self):
+    async def async_volume_down(self) -> None:
         """Volume down media player."""
-        self._denon232_receiver.serial_command('MVDOWN')
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "MVDOWN"
+        )
 
-    def set_volume_level(self, volume):
+    async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        self._denon232_receiver.serial_command('MV' +
-                            str(round(volume * self._volume_max)).zfill(2))
+        volume_int = round(volume * self._volume_max)
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, f"MV{volume_int:02d}"
+        )
 
-    def mute_volume(self, mute):
+    async def async_mute_volume(self, mute: bool) -> None:
         """Mute (true) or unmute (false) media player."""
-        self._denon232_receiver.serial_command('MU' + ('ON' if mute else 'OFF'))
+        mute_cmd = "MUON" if mute else "MUOFF"
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, mute_cmd
+        )
 
-    def select_source(self, source):
+    async def async_select_source(self, source: str) -> None:
         """Select input source."""
-        self._denon232_receiver.serial_command('SI' + self._source_list.get(source))
+        source_cmd = self._source_list.get(source, source)
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, f"SI{source_cmd}"
+        )
 
-    def turn_on_zone2(self):
-        """Turn On Zone 2."""
-        self._denon232_receiver.serial_command('Z2ON')
-        
-    def turn_off_zone2(self):
-        """Turn off Zone 2."""
-        self._denon232_receiver.serial_command('Z2OFF')
 
-    def volume_up_zone2(self):
-        """Volume up media player."""
-        self._denon232_receiver.serial_command('Z2UP')
+class DenonZone2(DenonBase):
+    """Representation of the Denon Zone 2."""
 
-    def volume_down_zone2(self):
-        """Volume down media player."""
-        self._denon232_receiver.serial_command('Z2DOWN')
+    _attr_supported_features = (
+        MediaPlayerEntityFeature.VOLUME_SET
+        | MediaPlayerEntityFeature.VOLUME_STEP
+        | MediaPlayerEntityFeature.VOLUME_MUTE
+        | MediaPlayerEntityFeature.TURN_ON
+        | MediaPlayerEntityFeature.TURN_OFF
+        | MediaPlayerEntityFeature.SELECT_SOURCE
+    )
 
-    def mute_volume_zone2(self, mute):
-        """Mute (true) or unmute (false) media player."""
-        self._denon232_receiver.serial_command('Z2MU' + ('ON' if mute else 'OFF'))
+    def __init__(
+        self,
+        receiver: Denon232Receiver,
+        name: str,
+        serial_port: str,
+        entry_id: str,
+    ) -> None:
+        """Initialize Zone 2."""
+        super().__init__(receiver, name, serial_port, entry_id, "zone2")
+        self._attr_unique_id = f"{serial_port}_zone2"
+        self._attr_name = "Zone 2"
+        # Zone 2 has limited source options (no TV, HDP per protocol)
+        self._source_list = ZONE2_INPUTS.copy()
+
+    async def async_update(self) -> None:
+        """Get the latest details from the device."""
+        hass = self.hass
+
+        # Get Zone 2 status (returns Z2ON, Z2OFF, or Z2<SOURCE>)
+        z2_response = await hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2?", True, True
+        )
+        if z2_response:
+            for line in z2_response:
+                if line == "Z2ON":
+                    self._power_state = "Z2ON"
+                elif line == "Z2OFF":
+                    self._power_state = "Z2OFF"
+                elif line.startswith("Z2") and len(line) > 2:
+                    # Check if it's a volume response (2 digits) or source
+                    suffix = line[2:]
+                    if suffix.isdigit() and len(suffix) <= 3:
+                        # Volume value
+                        if len(suffix) == 3:
+                            self._volume = int(suffix[:2]) + 0.5
+                        else:
+                            self._volume = int(suffix)
+                        if self._volume == 99:
+                            self._volume = 0
+                        _LOGGER.debug("Z2 Volume: %s", self._volume)
+                    elif suffix not in ("ON", "OFF"):
+                        # Source value
+                        self._source = suffix
+                        _LOGGER.debug("Z2 Source: %s", self._source)
+
+        # Get Zone 2 mute state
+        mute_response = await hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2MU?", True
+        )
+        self._muted = mute_response == "Z2MUON"
+
+    @property
+    def state(self) -> MediaPlayerState:
+        """Return the state of the device."""
+        if self._power_state == "Z2ON":
+            return MediaPlayerState.ON
+        return MediaPlayerState.OFF
+
+    @property
+    def volume_level(self) -> float:
+        """Volume level of Zone 2 (0..1)."""
+        return self._volume / self._volume_max if self._volume_max else 0
+
+    @property
+    def is_volume_muted(self) -> bool:
+        """Return boolean if volume is currently muted."""
+        return self._muted
+
+    @property
+    def source(self) -> str | None:
+        """Return the current input source for Zone 2."""
+        for pretty_name, name in self._source_list.items():
+            if self._source == name:
+                return pretty_name
+        return self._source
+
+    async def async_turn_on(self) -> None:
+        """Turn Zone 2 on."""
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2ON"
+        )
+
+    async def async_turn_off(self) -> None:
+        """Turn Zone 2 off."""
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2OFF"
+        )
+
+    async def async_volume_up(self) -> None:
+        """Volume up Zone 2."""
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2UP"
+        )
+
+    async def async_volume_down(self) -> None:
+        """Volume down Zone 2."""
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2DOWN"
+        )
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        """Set Zone 2 volume level, range 0..1."""
+        volume_int = round(volume * self._volume_max)
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, f"Z2{volume_int:02d}"
+        )
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        """Mute (true) or unmute (false) Zone 2."""
+        mute_cmd = "Z2MUON" if mute else "Z2MUOFF"
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, mute_cmd
+        )
+
+    async def async_select_source(self, source: str) -> None:
+        """Select input source for Zone 2."""
+        source_cmd = self._source_list.get(source, source)
+        await self.hass.async_add_executor_job(
+            self._receiver.serial_command, f"Z2{source_cmd}"
+        )

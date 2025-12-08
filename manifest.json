@@ -1,10 +1,10 @@
 {
-    "domain": "denon232",
-    "name": "Denon AVR Serial",
-    "documentation": "",
-    "dependencies": [],
-    "codeowners": [],
-    "requirements": ["pyserial==3.5"],
-    "config_flow": true,
-    "version": "1.0.0"
+  "domain": "denon232",
+  "name": "Denon AVR RS-232",
+  "codeowners": ["doucga"],
+  "config_flow": true,
+  "documentation": "https://github.com/doucga/denon232",
+  "iot_class": "local_polling",
+  "requirements": ["pyserial==3.5"],
+  "version": "1.0.0"
 }

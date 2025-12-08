@@ -1,5 +1,5 @@
 """
-Denon  RS232 interface to control the receiver.
+Denon RS232 interface to control the receiver.
 
 Based off:
 https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/media_player/denon.py#L228
@@ -9,57 +9,82 @@ Not all receivers have all functions.
 Functions can be found on in the xls file within this repository
 """
 
-import codecs
-import socket
-from time import sleep
-import serial
-import telnetlib
-import threading
 import logging
+import threading
+
+import serial
 
 DEFAULT_TIMEOUT = 1
 DEFAULT_WRITE_TIMEOUT = 1
 
 _LOGGER = logging.getLogger(__name__)
 
-class Denon232Receiver(object):
+
+class Denon232Receiver:
     """Denon232 receiver."""
 
-
-    def __init__(self, serial_port, timeout=DEFAULT_TIMEOUT,
-                 write_timeout=DEFAULT_WRITE_TIMEOUT):
+    def __init__(
+        self,
+        serial_port: str,
+        timeout: float = DEFAULT_TIMEOUT,
+        write_timeout: float = DEFAULT_WRITE_TIMEOUT,
+    ):
         """Create RS232 connection."""
-        self.ser = serial.Serial(serial_port, baudrate=9600, bytesize=8, parity='N', stopbits=1, timeout=timeout, write_timeout=write_timeout)
+        self._serial_port = serial_port
+        self._timeout = timeout
+        self._write_timeout = write_timeout
+        self.ser = serial.Serial(
+            serial_port,
+            baudrate=9600,
+            bytesize=8,
+            parity="N",
+            stopbits=1,
+            timeout=timeout,
+            write_timeout=write_timeout,
+        )
         self.lock = threading.Lock()
 
-    def serial_command(self, cmd, response=False, all_lines=False):
-        _LOGGER.debug('Command: %s ', cmd)
+    def serial_command(
+        self, cmd: str, response: bool = False, all_lines: bool = False
+    ) -> str | list[str] | None:
+        """Send a command to the receiver and optionally read response."""
+        _LOGGER.debug("Command: %s", cmd)
+        
         if not self.ser.is_open:
             self.ser.open()
-        
+
         try:
             self.lock.acquire()
-            
+
             # Denon uses the suffix \r, so add those to the above cmd.
-            final_command = ''.join([cmd, '\r']).encode('utf-8')
-            #_LOGGER.debug('Final Command (encoded): %s ', final_command)
-            #Write data to serial port
-            #self.ser.reset_output_buffer()
+            final_command = f"{cmd}\r".encode("utf-8")
+            # Write data to serial port
             self.ser.write(final_command)
-            #Read data from serial port
+            
+            # Read data from serial port
             if response:
                 lines = []
                 while True:
-                    line = self.ser.read_until(bytes('\r'.encode('utf-8')))
+                    line = self.ser.read_until(b"\r")
                     if not line:
                         break
-                    #_LOGGER.debug('Received (encoded): %s ', line)
-                    lines.append(line.decode().strip())
-                    _LOGGER.debug("Received: %s", line.decode().strip())
+                    decoded_line = line.decode().strip()
+                    lines.append(decoded_line)
+                    _LOGGER.debug("Received: %s", decoded_line)
+                
                 if all_lines:
                     return lines
-                return lines[0] if lines else ''
-            else:
-                return None
+                return lines[0] if lines else ""
+            
+            return None
         finally:
             self.lock.release()
+
+    def close(self) -> None:
+        """Close the serial connection."""
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+                _LOGGER.debug("Serial connection closed for %s", self._serial_port)
+        except serial.SerialException as err:
+            _LOGGER.error("Error closing serial connection: %s", err)

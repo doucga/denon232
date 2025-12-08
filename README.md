@@ -1,35 +1,130 @@
-# Denon RS-232 Receiver Integration for Home Assistant
+# Denon AVR RS-232 Integration for Home Assistant
 
-This custom component allows you to control Denon AV receivers through an RS-232 serial connection in Home Assistant. It provides comprehensive control over basic receiver functions including power, volume, input selection, and multi-zone support.
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+
+This custom integration allows you to control older Denon AV receivers through an RS-232 serial connection in Home Assistant. It provides comprehensive control over basic receiver functions including power, volume, input selection, and multi-zone support.
 
 ## Features
 
-- Power control (on/off)
-- Volume control (up/down, set level, mute)
-- Input source selection
-- Zone 2 support
-  - Power control
-  - Volume control
-  - Mute control
+- **Main Zone Control**
+  - Power on/off
+  - Volume control (up/down, set level, mute)
+  - Input source selection
+
+- **Zone 2 Control**
+  - Power on/off
+  - Volume control (up/down, set level, mute)
+  - Input source selection (limited sources - TV and HDP not supported per protocol)
+
 - Serial communication via RS-232
+- UI-based configuration (Config Flow)
+- Two separate media player entities for Main Zone and Zone 2
+- Half-dB volume precision support
 
 ## Supported Input Sources
 
-The following input sources are supported by default:
+### Main Zone
+The following input sources are supported:
+- Phono
 - CD
+- Tuner
 - DVD
-- TV/CBL
 - HDP
+- TV
+- SAT/CBL
+- VCR
 - DVR
-- Video Aux
+- V.AUX
+- Sirius (North America models only)
+- iPod
+
+### Zone 2
+Zone 2 supports all sources except **TV** and **HDP** (per AVR-2310 protocol specification).
+
+## Installation
+
+### HACS (Recommended)
+
+1. Open HACS in your Home Assistant instance
+2. Click on "Integrations"
+3. Click the three dots menu in the top right corner
+4. Select "Custom repositories"
+5. Add the repository URL and select "Integration" as the category
+6. Click "Add"
+7. Search for "Denon AVR RS-232" and install it
+8. Restart Home Assistant
+
+### Manual Installation
+
+1. Download the latest release from the repository
+2. Copy the `denon232` folder to your `custom_components` directory:
+   ```
+   custom_components/
+   └── denon232/
+       ├── __init__.py
+       ├── config_flow.py
+       ├── const.py
+       ├── denon232_receiver.py
+       ├── manifest.json
+       ├── media_player.py
+       ├── strings.json
+       └── translations/
+           └── en.json
+   ```
+3. Restart Home Assistant
 
 ## Configuration
 
-Download a zip file of the component from the repository and unzip it into the `custom_components` folder in your Home Assistant config directory.  
-Add the following to your Home Assistant configuration:
+1. Go to **Settings** → **Devices & Services**
+2. Click **+ Add Integration**
+3. Search for "Denon AVR RS-232"
+4. Enter a name for your receiver and the serial port path:
+   - Linux: `/dev/ttyUSB0` (or similar)
+   - Windows: `COM3` (or similar)
+5. Click **Submit**
 
-```yaml
-media_player:
-  - platform: denon232
-    serial_port: /dev/ttyUSB?
-    name: DenonReceiver
+Two media player entities will be created:
+- `media_player.<name>_main_zone` - Controls the main zone
+- `media_player.<name>_zone_2` - Controls Zone 2
+
+## Hardware Requirements
+
+- Denon AVR with RS-232 serial port
+- USB-to-Serial adapter (if your computer doesn't have a serial port)
+- Null modem cable or appropriate RS-232 cable
+
+## Troubleshooting
+
+### Serial Port Permissions (Linux)
+
+If you're running Home Assistant on Linux and encounter permission errors, you may need to add the Home Assistant user to the `dialout` group:
+
+```bash
+sudo usermod -a -G dialout homeassistant
+```
+
+Then restart Home Assistant.
+
+### Finding the Serial Port
+
+**Linux:**
+```bash
+ls /dev/ttyUSB*
+# or
+ls /dev/ttyACM*
+```
+
+**Windows:**
+Check Device Manager under "Ports (COM & LPT)"
+
+## Support
+
+If you encounter issues, please open an issue on the GitHub repository with:
+- Home Assistant version
+- Integration version
+- Denon receiver model
+- Error logs from Home Assistant
+
+## License
+
+This project is licensed under the MIT License.
