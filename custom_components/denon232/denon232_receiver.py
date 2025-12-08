@@ -11,11 +11,13 @@ Functions can be found on in the xls file within this repository
 
 import logging
 import threading
+import time
 
 import serial
 
-DEFAULT_TIMEOUT = 1
-DEFAULT_WRITE_TIMEOUT = 1
+DEFAULT_TIMEOUT = 0.15  # Reduced from 1s - responses should arrive within ~100ms
+DEFAULT_WRITE_TIMEOUT = 0.5
+COMMAND_DELAY = 0.05  # Small delay between write and read for receiver to process
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,10 +91,17 @@ class Denon232Receiver:
         try:
             self.lock.acquire()
 
+            # Clear any stale data in the buffer
+            self.ser.reset_input_buffer()
+            
             # Denon uses the suffix \r, so add those to the above cmd.
             final_command = f"{cmd}\r".encode("utf-8")
             # Write data to serial port
             self.ser.write(final_command)
+            self.ser.flush()  # Ensure data is sent immediately
+            
+            # Small delay to let the receiver process the command
+            time.sleep(COMMAND_DELAY)
             
             # Read data from serial port
             if response:
@@ -102,8 +111,9 @@ class Denon232Receiver:
                     if not line:
                         break
                     decoded_line = line.decode().strip()
-                    lines.append(decoded_line)
-                    _LOGGER.debug("Received: %s", decoded_line)
+                    if decoded_line:  # Only add non-empty lines
+                        lines.append(decoded_line)
+                        _LOGGER.debug("Received: %s", decoded_line)
                 
                 if all_lines:
                     return lines
@@ -118,6 +128,72 @@ class Denon232Receiver:
             return None
         finally:
             self.lock.release()
+
+    def batch_query(self, commands: list[str]) -> dict[str, str | list[str]]:
+        """Execute multiple query commands in a single lock acquisition.
+        
+        More efficient than calling serial_command multiple times as it
+        reduces lock overhead and serial port open/close cycles.
+        
+        Args:
+            commands: List of command strings (without response suffix)
+            
+        Returns:
+            Dictionary mapping command to response(s)
+        """
+        if not self._available or self.ser is None:
+            _LOGGER.debug("Batch query skipped - receiver not available")
+            return {cmd: "" for cmd in commands}
+            
+        try:
+            if not self.ser.is_open:
+                self.ser.open()
+        except (serial.SerialException, OSError) as err:
+            _LOGGER.error("Failed to open serial port: %s", err)
+            self._available = False
+            return {cmd: "" for cmd in commands}
+        
+        results = {}
+        
+        try:
+            self.lock.acquire()
+            
+            for cmd in commands:
+                # Clear any stale data in the buffer
+                self.ser.reset_input_buffer()
+                
+                _LOGGER.debug("Batch command: %s", cmd)
+                final_command = f"{cmd}\r".encode("utf-8")
+                self.ser.write(final_command)
+                self.ser.flush()
+                
+                # Small delay to let the receiver process
+                time.sleep(COMMAND_DELAY)
+                
+                # Read responses for this command
+                lines = []
+                while True:
+                    line = self.ser.read_until(b"\r")
+                    if not line:
+                        break
+                    decoded_line = line.decode().strip()
+                    if decoded_line:
+                        lines.append(decoded_line)
+                        _LOGGER.debug("Batch received: %s", decoded_line)
+                
+                results[cmd] = lines
+                
+        except (serial.SerialException, OSError) as err:
+            _LOGGER.error("Serial communication error in batch: %s", err)
+            self._available = False
+            # Fill remaining commands with empty results
+            for cmd in commands:
+                if cmd not in results:
+                    results[cmd] = []
+        finally:
+            self.lock.release()
+        
+        return results
 
     def close(self) -> None:
         """Close the serial connection."""

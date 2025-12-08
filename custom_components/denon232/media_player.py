@@ -113,47 +113,46 @@ class DenonMainZone(DenonBase):
 
     async def async_update(self) -> None:
         """Get the latest details from the device."""
-        hass = self.hass
-
-        # Get power state
-        self._power_state = await hass.async_add_executor_job(
-            self._receiver.serial_command, "PW?", True
+        # Use batch query for efficiency - single lock acquisition for all queries
+        results = await self.hass.async_add_executor_job(
+            self._receiver.batch_query, ["PW?", "MV?", "MU?", "SI?"]
         )
-
-        # Get volume and max volume
-        volume_lines = await hass.async_add_executor_job(
-            self._receiver.serial_command, "MV?", True, True
-        )
-        if volume_lines:
-            for line in volume_lines:
-                if line.startswith("MVMAX "):
-                    # Only grab two digit max
-                    self._volume_max = int(line[6:8])
-                    _LOGGER.debug("MVMAX Value: %s", self._volume_max)
-                elif line.startswith("MV"):
-                    # Volume can be 2 or 3 chars (e.g., MV50 or MV505 for half-dB)
-                    vol_str = line[2:]
-                    if len(vol_str) == 3:
-                        # Half-dB value like "505" means 50.5
-                        self._volume = int(vol_str[:2]) + 0.5
-                    else:
-                        self._volume = int(vol_str[:2])
-                    if self._volume == 99:
-                        self._volume = 0
-                    _LOGGER.debug("MV Value: %s", self._volume)
-
-        # Get mute state
-        mute_response = await hass.async_add_executor_job(
-            self._receiver.serial_command, "MU?", True
-        )
-        self._muted = mute_response == "MUON"
-
-        # Get source
-        source_response = await hass.async_add_executor_job(
-            self._receiver.serial_command, "SI?", True
-        )
-        if source_response and source_response.startswith("SI"):
-            self._source = source_response[2:]
+        
+        # Parse power state
+        pw_responses = results.get("PW?", [])
+        if pw_responses:
+            self._power_state = pw_responses[0] if pw_responses else None
+        
+        # Parse volume and max volume
+        volume_lines = results.get("MV?", [])
+        for line in volume_lines:
+            if line.startswith("MVMAX "):
+                # Only grab two digit max
+                self._volume_max = int(line[6:8])
+                _LOGGER.debug("MVMAX Value: %s", self._volume_max)
+            elif line.startswith("MV"):
+                # Volume can be 2 or 3 chars (e.g., MV50 or MV505 for half-dB)
+                vol_str = line[2:]
+                if len(vol_str) == 3:
+                    # Half-dB value like "505" means 50.5
+                    self._volume = int(vol_str[:2]) + 0.5
+                else:
+                    self._volume = int(vol_str[:2])
+                if self._volume == 99:
+                    self._volume = 0
+                _LOGGER.debug("MV Value: %s", self._volume)
+        
+        # Parse mute state
+        mute_responses = results.get("MU?", [])
+        if mute_responses:
+            self._muted = mute_responses[0] == "MUON"
+        
+        # Parse source
+        source_responses = results.get("SI?", [])
+        if source_responses:
+            source_response = source_responses[0]
+            if source_response.startswith("SI"):
+                self._source = source_response[2:]
 
     @property
     def state(self) -> MediaPlayerState:
@@ -185,24 +184,36 @@ class DenonMainZone(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "PWON"
         )
+        # Optimistic update for immediate UI feedback
+        self._power_state = "PWON"
+        self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
         """Turn off media player."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "PWSTANDBY"
         )
+        # Optimistic update for immediate UI feedback
+        self._power_state = "PWSTANDBY"
+        self.async_write_ha_state()
 
     async def async_volume_up(self) -> None:
         """Volume up media player."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "MVUP"
         )
+        # Optimistic update - volume step is typically 1
+        self._volume = min(self._volume + 1, self._volume_max)
+        self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
         """Volume down media player."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "MVDOWN"
         )
+        # Optimistic update
+        self._volume = max(self._volume - 1, 0)
+        self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
@@ -210,6 +221,9 @@ class DenonMainZone(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, f"MV{volume_int:02d}"
         )
+        # Optimistic update for immediate UI feedback
+        self._volume = volume_int
+        self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute (true) or unmute (false) media player."""
@@ -217,6 +231,9 @@ class DenonMainZone(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, mute_cmd
         )
+        # Optimistic update for immediate UI feedback
+        self._muted = mute
+        self.async_write_ha_state()
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""
@@ -224,6 +241,9 @@ class DenonMainZone(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, f"SI{source_cmd}"
         )
+        # Optimistic update for immediate UI feedback
+        self._source = source_cmd
+        self.async_write_ha_state()
 
 
 class DenonZone2(DenonBase):
@@ -254,40 +274,39 @@ class DenonZone2(DenonBase):
 
     async def async_update(self) -> None:
         """Get the latest details from the device."""
-        hass = self.hass
-
-        # Get Zone 2 status (returns Z2ON, Z2OFF, or Z2<SOURCE>)
-        z2_response = await hass.async_add_executor_job(
-            self._receiver.serial_command, "Z2?", True, True
+        # Use batch query for efficiency - single lock acquisition for all queries
+        results = await self.hass.async_add_executor_job(
+            self._receiver.batch_query, ["Z2?", "Z2MU?"]
         )
-        if z2_response:
-            for line in z2_response:
-                if line == "Z2ON":
-                    self._power_state = "Z2ON"
-                elif line == "Z2OFF":
-                    self._power_state = "Z2OFF"
-                elif line.startswith("Z2") and len(line) > 2:
-                    # Check if it's a volume response (2 digits) or source
-                    suffix = line[2:]
-                    if suffix.isdigit() and len(suffix) <= 3:
-                        # Volume value
-                        if len(suffix) == 3:
-                            self._volume = int(suffix[:2]) + 0.5
-                        else:
-                            self._volume = int(suffix)
-                        if self._volume == 99:
-                            self._volume = 0
-                        _LOGGER.debug("Z2 Volume: %s", self._volume)
-                    elif suffix not in ("ON", "OFF"):
-                        # Source value
-                        self._source = suffix
-                        _LOGGER.debug("Z2 Source: %s", self._source)
+        
+        # Parse Zone 2 status (returns Z2ON, Z2OFF, or Z2<SOURCE>)
+        z2_response = results.get("Z2?", [])
+        for line in z2_response:
+            if line == "Z2ON":
+                self._power_state = "Z2ON"
+            elif line == "Z2OFF":
+                self._power_state = "Z2OFF"
+            elif line.startswith("Z2") and len(line) > 2:
+                # Check if it's a volume response (2 digits) or source
+                suffix = line[2:]
+                if suffix.isdigit() and len(suffix) <= 3:
+                    # Volume value
+                    if len(suffix) == 3:
+                        self._volume = int(suffix[:2]) + 0.5
+                    else:
+                        self._volume = int(suffix)
+                    if self._volume == 99:
+                        self._volume = 0
+                    _LOGGER.debug("Z2 Volume: %s", self._volume)
+                elif suffix not in ("ON", "OFF"):
+                    # Source value
+                    self._source = suffix
+                    _LOGGER.debug("Z2 Source: %s", self._source)
 
-        # Get Zone 2 mute state
-        mute_response = await hass.async_add_executor_job(
-            self._receiver.serial_command, "Z2MU?", True
-        )
-        self._muted = mute_response == "Z2MUON"
+        # Parse Zone 2 mute state
+        mute_responses = results.get("Z2MU?", [])
+        if mute_responses:
+            self._muted = mute_responses[0] == "Z2MUON"
 
     @property
     def state(self) -> MediaPlayerState:
@@ -319,24 +338,36 @@ class DenonZone2(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "Z2ON"
         )
+        # Optimistic update for immediate UI feedback
+        self._power_state = "Z2ON"
+        self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
         """Turn Zone 2 off."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "Z2OFF"
         )
+        # Optimistic update for immediate UI feedback
+        self._power_state = "Z2OFF"
+        self.async_write_ha_state()
 
     async def async_volume_up(self) -> None:
         """Volume up Zone 2."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "Z2UP"
         )
+        # Optimistic update
+        self._volume = min(self._volume + 1, self._volume_max)
+        self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
         """Volume down Zone 2."""
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, "Z2DOWN"
         )
+        # Optimistic update
+        self._volume = max(self._volume - 1, 0)
+        self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set Zone 2 volume level, range 0..1."""
@@ -344,6 +375,9 @@ class DenonZone2(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, f"Z2{volume_int:02d}"
         )
+        # Optimistic update for immediate UI feedback
+        self._volume = volume_int
+        self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute (true) or unmute (false) Zone 2."""
@@ -351,6 +385,9 @@ class DenonZone2(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, mute_cmd
         )
+        # Optimistic update for immediate UI feedback
+        self._muted = mute
+        self.async_write_ha_state()
 
     async def async_select_source(self, source: str) -> None:
         """Select input source for Zone 2."""
@@ -358,3 +395,6 @@ class DenonZone2(DenonBase):
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, f"Z2{source_cmd}"
         )
+        # Optimistic update for immediate UI feedback
+        self._source = source_cmd
+        self.async_write_ha_state()
