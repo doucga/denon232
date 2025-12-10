@@ -144,8 +144,11 @@ class DenonMainZone(DenonBase):
         
         # Parse mute state
         mute_responses = results.get("MU?", [])
-        if mute_responses:
-            self._muted = mute_responses[0] == "MUON"
+        for mute_line in mute_responses:
+            if mute_line.startswith("MU"):
+                self._muted = mute_line == "MUON"
+                _LOGGER.debug("Mute state: %s (from %s)", self._muted, mute_line)
+                break
         
         # Parse source
         source_responses = results.get("SI?", [])
@@ -305,8 +308,11 @@ class DenonZone2(DenonBase):
 
         # Parse Zone 2 mute state
         mute_responses = results.get("Z2MU?", [])
-        if mute_responses:
-            self._muted = mute_responses[0] == "Z2MUON"
+        for mute_line in mute_responses:
+            if mute_line.startswith("Z2MU"):
+                self._muted = mute_line == "Z2MUON"
+                _LOGGER.debug("Zone 2 mute state: %s (from %s)", self._muted, mute_line)
+                break
 
     @property
     def state(self) -> MediaPlayerState:
