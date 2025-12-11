@@ -229,13 +229,23 @@ class DenonMainZone(DenonBase):
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
-        """Mute (true) or unmute (false) media player."""
-        mute_cmd = "MUON" if mute else "MUOFF"
+        """Toggle mute on the media player."""
+        # Query actual mute state from receiver and toggle it
+        current_mute = await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "MU?", True
+        )
+        
+        # Toggle based on actual receiver state
+        if current_mute == "MUON":
+            mute_cmd = "MUOFF"
+            self._muted = False
+        else:
+            mute_cmd = "MUON"
+            self._muted = True
+        
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, mute_cmd
         )
-        # Optimistic update for immediate UI feedback
-        self._muted = mute
         self.async_write_ha_state()
 
     async def async_select_source(self, source: str) -> None:
@@ -386,13 +396,23 @@ class DenonZone2(DenonBase):
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
-        """Mute (true) or unmute (false) Zone 2."""
-        mute_cmd = "Z2MUON" if mute else "Z2MUOFF"
+        """Toggle mute on Zone 2."""
+        # Query actual mute state from receiver and toggle it
+        current_mute = await self.hass.async_add_executor_job(
+            self._receiver.serial_command, "Z2MU?", True
+        )
+        
+        # Toggle based on actual receiver state
+        if current_mute == "Z2MUON":
+            mute_cmd = "Z2MUOFF"
+            self._muted = False
+        else:
+            mute_cmd = "Z2MUON"
+            self._muted = True
+        
         await self.hass.async_add_executor_job(
             self._receiver.serial_command, mute_cmd
         )
-        # Optimistic update for immediate UI feedback
-        self._muted = mute
         self.async_write_ha_state()
 
     async def async_select_source(self, source: str) -> None:
