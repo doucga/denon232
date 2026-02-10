@@ -133,4 +133,6 @@ This project is licensed under the MIT License.
 
 If you found this integration useful you can buy me a coffee.
 
-<a href="https://www.buymeacoffee.com/doucga"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=doucga&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+<a href="https://www.buymeacoffee.com/doucga">
+  <img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&amp;emoji=&amp;slug=doucga&amp;button_colour=FFDD00&amp;font_colour=000000&amp;font_family=Cookie&amp;outline_colour=000000&amp;coffee_colour=ffffff" />
+</a>
